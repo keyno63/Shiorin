@@ -1,0 +1,36 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: shiorin
+          POSTGRES_PASSWORD: shiorin_test
+          POSTGRES_DB: shiorin_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shiorin -d shiorin_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://shiorin:shiorin_test@localhost:5432/shiorin_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Check formatting
+        run: test -z "$(gofmt -l cmd db internal)"
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go build ./...

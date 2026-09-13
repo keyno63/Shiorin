@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: shiorin
+      POSTGRES_PASSWORD: shiorin_dev
+      POSTGRES_DB: shiorin
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - shiorin-db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shiorin -d shiorin"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  shiorin-db:

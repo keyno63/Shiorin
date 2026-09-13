@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/keyno63/Shiorin/internal/auth"
 	"github.com/keyno63/Shiorin/internal/bookmark"
 	"github.com/keyno63/Shiorin/internal/httpapi"
 	"log/slog"
@@ -25,7 +26,7 @@ func run() error {
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
-	srv := &http.Server{Addr: addr, Handler: httpapi.New(&bookmark.Memory{}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
+	srv := &http.Server{Addr: addr, Handler: httpapi.New(&bookmark.Memory{}, auth.New()), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errCh := make(chan error, 1)

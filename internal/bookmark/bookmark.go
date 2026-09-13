@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ type Input struct {
 
 type Bookmark struct {
 	Input
+	UserID    string    `json:"user_id"`
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -28,9 +30,11 @@ type Query struct {
 }
 
 type Repository interface {
-	Create(context.Context, Input) (Bookmark, error)
-	Search(context.Context, Query) ([]Bookmark, int, error)
+	Create(context.Context, string, Input) (Bookmark, error)
+	Search(context.Context, string, Query) ([]Bookmark, int, error)
 }
+
+var ErrMissingUser = errors.New("user ID is required")
 
 // Memory keeps bookmarks until the process exits.
 type Memory struct {
@@ -45,7 +49,10 @@ func clone(b Bookmark) Bookmark {
 	return b
 }
 
-func (m *Memory) Create(ctx context.Context, in Input) (Bookmark, error) {
+func (m *Memory) Create(ctx context.Context, userID string, in Input) (Bookmark, error) {
+	if strings.TrimSpace(userID) == "" {
+		return Bookmark{}, ErrMissingUser
+	}
 	if err := ctx.Err(); err != nil {
 		return Bookmark{}, err
 	}
@@ -53,14 +60,17 @@ func (m *Memory) Create(ctx context.Context, in Input) (Bookmark, error) {
 	if _, err := rand.Read(id[:]); err != nil {
 		return Bookmark{}, err
 	}
-	b := Bookmark{Input: in, ID: hex.EncodeToString(id[:]), CreatedAt: time.Now().UTC()}
+	b := Bookmark{Input: in, UserID: userID, ID: hex.EncodeToString(id[:]), CreatedAt: time.Now().UTC()}
 	m.mu.Lock()
 	m.items = append(m.items, clone(b))
 	m.mu.Unlock()
 	return clone(b), nil
 }
 
-func (m *Memory) Search(ctx context.Context, q Query) ([]Bookmark, int, error) {
+func (m *Memory) Search(ctx context.Context, userID string, q Query) ([]Bookmark, int, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, 0, ErrMissingUser
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -70,6 +80,9 @@ func (m *Memory) Search(ctx context.Context, q Query) ([]Bookmark, int, error) {
 	matches := []Bookmark{}
 	for i := len(m.items) - 1; i >= 0; i-- {
 		b := m.items[i]
+		if b.UserID != userID {
+			continue
+		}
 		if text != "" && !strings.Contains(strings.ToLower(b.Title+" "+b.URL+" "+b.Note), text) {
 			continue
 		}

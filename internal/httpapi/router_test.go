@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"encoding/json"
+	"github.com/keyno63/Shiorin/internal/auth"
 	"github.com/keyno63/Shiorin/internal/bookmark"
 	"github.com/keyno63/Shiorin/internal/httpapi"
 	"net/http"
@@ -16,8 +17,18 @@ func request(h http.Handler, method, path, body string) *httptest.ResponseRecord
 	return w
 }
 
+func authenticatedHandler(t *testing.T) http.Handler {
+	t.Helper()
+	h := httpapi.New(&bookmark.Memory{}, auth.New())
+	_, token := registerAndLogin(t, h, "tester")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+token)
+		h.ServeHTTP(w, r)
+	})
+}
+
 func TestCreateAndSearch(t *testing.T) {
-	h := httpapi.New(&bookmark.Memory{})
+	h := authenticatedHandler(t)
 	for _, body := range []string{
 		`{"title":"Go検索入門","url":"https://example.com/1","tags":[" Go ","go","DB"]}`,
 		`{"title":"Go応用","url":"https://example.com/2","tags":["go"]}`,
@@ -63,7 +74,7 @@ func TestCreateAndSearch(t *testing.T) {
 }
 
 func TestInvalidRequests(t *testing.T) {
-	h := httpapi.New(&bookmark.Memory{})
+	h := authenticatedHandler(t)
 	cases := []struct {
 		method, path, body string
 		status             int

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,14 +10,17 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/keyno63/Shiorin/internal/auth"
 	"github.com/keyno63/Shiorin/internal/bookmark"
 )
 
-func New(repo bookmark.Repository) http.Handler {
+func New(repo bookmark.Repository, accounts *auth.Service) http.Handler {
 	mux := http.NewServeMux()
+	addAuthRoutes(mux, accounts)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
-	mux.HandleFunc("POST /bookmarks", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /bookmarks", requireUser(accounts, func(w http.ResponseWriter, r *http.Request, user auth.User) {
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
@@ -32,6 +36,10 @@ func New(repo bookmark.Repository) http.Handler {
 		}
 		in.Title = strings.TrimSpace(in.Title)
 		in.URL = strings.TrimSpace(in.URL)
+		if strings.ContainsRune(in.Title+in.URL+in.Note+strings.Join(in.Tags, ""), 0) {
+			fail(w, 400, "bookmark fields must not contain NUL characters")
+			return
+		}
 		if in.Title == "" || len(in.Title) > 500 {
 			fail(w, 400, "title is required and must be at most 500 bytes")
 			return
@@ -51,15 +59,19 @@ func New(repo bookmark.Repository) http.Handler {
 			}
 		}
 		in.Tags = tags
-		b, err := repo.Create(r.Context(), in)
+		b, err := repo.Create(r.Context(), user.ID, in)
 		if err != nil {
 			slog.Error("create bookmark", "error", err)
 			fail(w, 500, "internal server error")
 			return
 		}
 		respond(w, 201, b)
-	})
-	mux.HandleFunc("GET /bookmarks", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("GET /bookmarks", requireUser(accounts, func(w http.ResponseWriter, r *http.Request, user auth.User) {
+		if r.URL.Query().Has("user_id") {
+			fail(w, 400, "user_id is determined by your session")
+			return
+		}
 		limit, err := number(r, "limit", 20, 1, 100)
 		if err != nil {
 			fail(w, 400, "limit must be between 1 and 100")
@@ -71,7 +83,11 @@ func New(repo bookmark.Repository) http.Handler {
 			return
 		}
 		q := bookmark.Query{Text: r.URL.Query().Get("q"), Tag: r.URL.Query().Get("tag"), Limit: limit, Offset: offset}
-		items, total, err := repo.Search(r.Context(), q)
+		if strings.ContainsRune(q.Text+q.Tag, 0) {
+			fail(w, 400, "search fields must not contain NUL characters")
+			return
+		}
+		items, total, err := repo.Search(r.Context(), user.ID, q)
 		if err != nil {
 			slog.Error("search bookmarks", "error", err)
 			fail(w, 500, "internal server error")
@@ -83,8 +99,12 @@ func New(repo bookmark.Repository) http.Handler {
 			Limit  int                 `json:"limit"`
 			Offset int                 `json:"offset"`
 		}{items, total, limit, offset})
+	}))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
-	return mux
 }
 
 func number(r *http.Request, key string, fallback, min, max int) (int, error) {

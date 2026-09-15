@@ -1,12 +1,28 @@
 # Shiorin
 
-A Go starter project for an API that stores and searches technical article bookmarks.
+Shiorin is a self-hosted bookmark API written in Go. It stores technical articles in PostgreSQL and provides bearer-token authentication, per-user data isolation, tags, and text search.
 
-Requires Go 1.27.1 or later and PostgreSQL (the development configuration uses PostgreSQL 18).
-Database access uses `pgx`; password hashing uses Argon2id from `golang.org/x/crypto`.
-Go downloads dependencies on the first run.
+## Features
 
-## Run
+- Account registration with Argon2id password hashing
+- Independent, revocable login sessions
+- Private bookmarks scoped to the authenticated user
+- Text search, exact tag filtering, and pagination
+- PostgreSQL persistence with explicit transactional migrations
+- Optional in-memory storage for temporary development
+
+## Requirements
+
+- Go 1.27.1 or later
+- Docker-compatible container runtime for the included PostgreSQL 18 database, or an existing PostgreSQL server
+
+Go downloads module dependencies on the first run. Start Docker Desktop, Rancher Desktop, or another compatible runtime before using the included Compose configuration.
+
+## Quick start
+
+Start PostgreSQL, apply the schema, and run the API.
+
+### PowerShell
 
 ```powershell
 docker compose up -d --wait db
@@ -15,212 +31,195 @@ go run ./cmd/migrate
 go run ./cmd/api
 ```
 
-Start Docker or Rancher Desktop first. The Compose credentials are for local development only.
-PostgreSQL data lives in a named volume and survives container and API restarts.
-For an existing PostgreSQL server, set `DATABASE_URL` to a fresh database and run the same migration command.
-Use TLS when connecting to a remote database.
+### macOS and Linux
 
-The server listens on http://127.0.0.1:8080 by default. Press Ctrl+C to stop it.
-To use a different address, set the environment variable before starting the server:
+```bash
+docker compose up -d --wait db
+export DATABASE_URL="postgres://shiorin:shiorin_dev@127.0.0.1:54329/shiorin?sslmode=disable"
+go run ./cmd/migrate
+go run ./cmd/api
+```
+
+The server listens on <http://127.0.0.1:8080> by default. Check that it is running:
+
+```console
+$ curl http://127.0.0.1:8080/healthz
+{"status":"ok"}
+```
+
+The Compose credentials are for local development only. PostgreSQL data is stored in a named volume and survives container and API restarts.
+
+## Try the API
+
+This PowerShell example registers a user, logs in, creates and searches for a bookmark, and logs out. Run it in a separate terminal while the API is running.
+
+```powershell
+$credentials = @{
+    username = "alice"
+    password = "replace-with-your-own-long-passphrase"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/auth/register -ContentType "application/json" -Body $credentials
+$login = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/auth/login -ContentType "application/json" -Body $credentials
+$headers = @{ Authorization = "Bearer $($login.access_token)" }
+
+$bookmark = @{
+    title = "Building a search API in Go"
+    url = "https://example.com/go-search"
+    note = "Implementation notes on database search"
+    tags = @("Go", "database")
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/bookmarks -Headers $headers -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($bookmark))
+Invoke-RestMethod "http://127.0.0.1:8080/bookmarks?q=go&tag=database&limit=20&offset=0" -Headers $headers
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/auth/logout -Headers $headers
+```
+
+## API overview
+
+All endpoints except `/healthz`, `/auth/register`, and `/auth/login` require an `Authorization: Bearer <access_token>` header.
+
+| Method | Path | Auth | Success | Description |
+|---|---|:---:|:---:|---|
+| GET | `/healthz` | No | 200 | Check whether the API process is running |
+| POST | `/auth/register` | No | 201 | Register a username and password |
+| POST | `/auth/login` | No | 200 | Exchange credentials for a bearer token |
+| POST | `/auth/logout` | Yes | 204 | Revoke the current bearer token |
+| GET | `/me` | Yes | 200 | Return the authenticated user |
+| GET | `/me/sessions` | Yes | 200 | List the current user's active sessions |
+| PATCH | `/me/sessions/{id}` | Yes | 204 | Rename an owned session using `device_label` |
+| DELETE | `/me/sessions/{id}` | Yes | 204 | Revoke an owned session |
+| POST | `/me/sessions/revoke-others` | Yes | 204 | Revoke every session except the current one |
+| POST | `/bookmarks` | Yes | 201 | Create a bookmark |
+| GET | `/bookmarks` | Yes | 200 | Search the current user's bookmarks |
+
+### Search
+
+`GET /bookmarks` accepts these query parameters:
+
+| Parameter | Behavior |
+|---|---|
+| `q` | Case-insensitive substring match across title, URL, and note |
+| `tag` | Exact match after trimming whitespace and normalizing case |
+| `limit` | Page size from 1 to 100; defaults to 20 |
+| `offset` | Number of records to skip, from 0 to 1,000,000; defaults to 0 |
+
+When both `q` and `tag` are present, a bookmark must match both. Responses contain `items`, `total`, `limit`, and `offset`. PostgreSQL results are ordered by creation time descending, then ID descending. Substring matching currently scans within the owner's records; a dedicated search index is a future enhancement.
+
+Only HTTP and HTTPS bookmark URLs are accepted. The application does not visit submitted URLs or fetch article content. POST request bodies are limited to 1 MiB.
+
+## Configuration
+
+The application reads configuration from environment variables. `.env.example` contains example values, but `.env` files are not loaded automatically.
+
+| Variable | Default | Description |
+|---|---|---|
+| `HTTP_ADDR` | `127.0.0.1:8080` | HTTP listen address |
+| `STORAGE` | `postgres` | Storage backend: `postgres` or `memory` |
+| `DATABASE_URL` | None | PostgreSQL connection string; required for PostgreSQL storage |
+| `TEST_DATABASE_URL` | None | Enables PostgreSQL integration tests |
+
+To use a different listen address:
 
 ```powershell
 $env:HTTP_ADDR = "127.0.0.1:9090"
 go run ./cmd/api
 ```
 
-`.env.example` provides an example configuration. The application does not load `.env` files automatically.
-`STORAGE` defaults to `postgres`; a missing connection string or schema causes startup to fail.
-It never silently falls back to memory after a database error.
-
-For an explicitly temporary instance without PostgreSQL:
+To run an explicitly temporary instance without PostgreSQL:
 
 ```powershell
 $env:STORAGE = "memory"
 go run ./cmd/api
 ```
 
-Memory mode loses all accounts, sessions, and bookmarks on restart. Set `STORAGE` back to `postgres`
-to use persistent storage. Multiple API instances must use the same database for shared authentication and data.
+Memory mode loses all accounts, sessions, and bookmarks on restart. A missing PostgreSQL connection string or schema causes startup to fail; Shiorin never silently falls back to memory after a database error. Multiple API instances must share the same database to share authentication and data.
 
-## Try the API
+For an existing PostgreSQL server, set `DATABASE_URL` to a fresh database and run `go run ./cmd/migrate`. Use TLS when connecting to a remote database.
 
-Run these commands in a separate PowerShell session while the server is running at its default address:
+## Accounts and sessions
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:8080/healthz
+Usernames are case-insensitive, converted to lowercase, and stripped of surrounding whitespace. They must contain 3–32 ASCII letters, digits, underscores, or hyphens. Duplicate usernames return 409.
 
-$credentials = @{
-    username = "alice"
-    password = "replace-with-your-own-long-passphrase"
-} | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/auth/register -ContentType "application/json" -Body $credentials
-$login = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/auth/login -ContentType "application/json" -Body $credentials
-$headers = @{ Authorization = "Bearer $($login.access_token)" }
-Invoke-RestMethod http://127.0.0.1:8080/me -Headers $headers
+Passwords are not trimmed or normalized. They must contain at least 15 characters and no more than 1,024 UTF-8 bytes. Registration does not log the user in. Login returns `user`, `access_token`, `token_type`, `expires_at`, and `session_id`.
 
-$body = @{
-    title = "Building a search API in Go"
-    url = "https://example.com/go-search"
-    note = "Implementation notes on database search"
-    tags = @("Go", "database")
-} | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/bookmarks -Headers $headers -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($body))
+Each login creates an independent session with a fixed 24-hour lifetime. Login optionally accepts a `device_label` of up to 100 UTF-8 bytes. The server also records up to 512 UTF-8 bytes from the client-provided `User-Agent` header. These values are descriptive only and must be escaped if rendered in a UI.
 
-Invoke-RestMethod "http://127.0.0.1:8080/bookmarks?q=go&tag=database&limit=20&offset=0" -Headers $headers
+The session list returns `id`, `created_at`, `expires_at`, `last_seen_at`, `device_label`, `user_agent`, and `current`; it never exposes access tokens or token digests. `last_seen_at` updates at most once every five minutes and does not extend expiry. Inactive session records are removed seven days after expiry or revocation.
 
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/auth/logout -Headers $headers
-```
+Only the authorization header is accepted for tokens—not query parameters or cookies. Logout revokes only the supplied token. Missing, invalid, expired, or revoked tokens return 401. Other users' sessions cannot be listed, renamed, or revoked; an inaccessible or inactive session ID returns 404.
 
-| Method | Path | Description |
-|---|---|---|
-| GET | /healthz | Check whether the API process is running |
-| POST | /auth/register | Register a username and password; returns the user (201) |
-| POST | /auth/login | Exchange credentials for a bearer token (200) |
-| POST | /auth/logout | Revoke the current bearer token (204; authentication required) |
-| GET | /me | Return the authenticated user |
-| GET | /me/sessions | List the current user's active sessions, including the current session |
-| PATCH | /me/sessions/{id} | Rename an owned session using device_label (204) |
-| DELETE | /me/sessions/{id} | Revoke one owned session, including the current one (204) |
-| POST | /me/sessions/revoke-others | Revoke all other sessions while keeping the current one (204) |
-| POST | /bookmarks | Create a bookmark owned by the authenticated user |
-| GET | /bookmarks | Search only the authenticated user's bookmarks |
+## Security and ownership
 
-## Accounts and ownership
+- Every bookmark is assigned to the authenticated user by the server. Clients cannot set or query `user_id`.
+- Search filters, totals, and pagination apply only to the current user's records. There is no public or cross-user search.
+- Passwords use independently salted Argon2id hashes with 19 MiB of memory, two passes, and one lane.
+- Session tokens contain 32 random bytes and are stored only as SHA-256 digests.
+- Account and authenticated responses include `Cache-Control: no-store`.
+- At most two password hashes run concurrently. Excess authentication work returns 429 with `Retry-After`.
+- PostgreSQL is checked on every authenticated request. Database failures fail closed with 500.
+- Revocation is shared across API instances after its transaction commits. Requests already authenticated may still finish.
 
-Anyone can register a separate account using `username` and `password`.
-Usernames are case-insensitive, normalized to lowercase with surrounding whitespace removed,
-and must contain 3-32 ASCII letters, digits, underscores, or hyphens. Duplicate usernames return 409.
-Passwords are not trimmed or normalized. They must contain at least 15 characters and no more than 1024 UTF-8 bytes.
+The password hashing approach follows the [Go Argon2 documentation](https://pkg.go.dev/golang.org/x/crypto/argon2) and [OWASP password storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
 
-Registration does not log the user in. Login returns `user`, `access_token`, `token_type`, `expires_at`, and `session_id`.
-Send the token in the `Authorization: Bearer <access_token>` header. Sessions expire after 24 hours;
-logout revokes only the supplied token. Missing, invalid, expired, or revoked tokens return 401.
-Tokens are accepted only in the authorization header, not as query parameters or cookies.
+## Development
 
-Each bookmark contains a server-assigned `user_id`. Clients cannot assign ownership:
-`user_id` in a creation body or search query is rejected with 400. Search filters, `total`,
-and pagination apply only to the current user's records. There is no public or cross-user search.
-To try isolation, register and log in as `bob`, then search with Bob's token: his results are empty
-until he creates his own bookmarks.
+Run the standard checks:
 
-Passwords use independently salted Argon2id hashes (19 MiB memory, two passes, one lane).
-Session tokens contain 32 random bytes and are stored only as SHA-256 digests.
-Account and authenticated responses use `Cache-Control: no-store`.
-At most two password hashes run concurrently; excess authentication work returns 429 with `Retry-After`.
-The hashing approach follows the [Go Argon2 documentation](https://pkg.go.dev/golang.org/x/crypto/argon2)
-and [OWASP password storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
-
-## Manage logged-in sessions
-
-Each login creates an independent session. This represents a login in an app or browser, not a verified physical device.
-Login optionally accepts `device_label` (up to 100 UTF-8 bytes). The server also records the `User-Agent` header
-(up to 512 UTF-8 bytes). Both are descriptive, client-provided information and are never used for authentication.
-Escape these values when rendering them in a future UI.
-
-After registering Alice, log in from another client and inspect sessions:
-
-```powershell
-$credentials = @{
-    username = "alice"
-    password = "replace-with-your-own-long-passphrase"
-    device_label = "Work laptop"
-} | ConvertTo-Json
-$login = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/auth/login -ContentType "application/json" -Body $credentials
-$headers = @{ Authorization = "Bearer $($login.access_token)" }
-$sessions = Invoke-RestMethod http://127.0.0.1:8080/me/sessions -Headers $headers
-$sessions.items | Format-Table id, device_label, user_agent, last_seen_at, current
-
-$label = @{ device_label = "Personal laptop" } | ConvertTo-Json
-Invoke-RestMethod -Method Patch -Uri "http://127.0.0.1:8080/me/sessions/$($login.session_id)" -Headers $headers -ContentType "application/json" -Body $label
-
-# Revoke all other logins, keeping this one.
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/me/sessions/revoke-others -Headers $headers
-
-# Revoke the current login. A listed session ID can be used to revoke another login instead.
-Invoke-RestMethod -Method Delete -Uri "http://127.0.0.1:8080/me/sessions/$($login.session_id)" -Headers $headers
-```
-
-The list returns `items` containing `id`, `created_at`, `expires_at`, `last_seen_at`, `device_label`,
-`user_agent`, and `current`. It never returns access tokens or token digests. Other users' sessions cannot
-be listed, renamed, or revoked; an inaccessible or inactive session ID returns 404.
-
-API instances check PostgreSQL on every authenticated request, without a local authentication cache.
-Once revocation commits, subsequent authentication checks on any instance reject the token.
-Requests that already passed authentication may still finish. Database failures fail closed with 500
-rather than granting access or treating an outage as an incorrect password.
-
-Session expiry is fixed at 24 hours after login. `last_seen_at` updates at most every five minutes per session,
-so it is approximate and does not extend expiry. The server runs cleanup at startup and every 15 minutes,
-deleting records seven days after expiry or revocation. Inactive records never authenticate during retention.
-Session history is not exposed in the active-session list. Keep clocks synchronized across API hosts.
-
-## Search behavior
-
-`q` performs a case-insensitive substring search across the title, URL, and note.
-`tag` performs an exact match after trimming surrounding whitespace and normalizing case.
-When both `q` and `tag` are provided, a bookmark must match both conditions.
-PostgreSQL results are ordered by creation time descending, then ID descending to break ties.
-Memory mode uses reverse insertion order. Responses contain `items`, `total`, `limit`, and `offset` fields.
-PostgreSQL computes the count and page in one consistent snapshot. Substring matching currently uses a scan
-within the owner's records; dedicated full-text indexes are a future enhancement.
-
-`limit` accepts values from 1 to 100 (default: 20), and `offset` accepts values from 0 to 1,000,000 (default: 0).
-POST request bodies are limited to 1 MiB. Only HTTP and HTTPS URLs are accepted.
-The application does not visit submitted URLs or fetch article content.
-
-## Project structure
-
-- `cmd/api`: Server startup, timeouts, and graceful shutdown
-- `cmd/migrate`: Explicit transactional schema migration command
-- `internal/httpapi`: HTTP handlers, input validation, and API tests
-- `internal/auth`: Registration, password hashing, session management, repository contract, and test memory store
-- `internal/bookmark`: Data types, repository interface, and concurrency-safe in-memory storage
-- `internal/postgres`: Persistent account, session, and bookmark repositories; database integration tests
-- `db/schema.sql`: Initial managed schema, embedded in the migration runner
-- `compose.yaml`: Local PostgreSQL instance with persistent storage
-- `.github/workflows/ci.yml`: Formatting checks, vet, race detection tests, and builds
-
-## Validation
-
-```powershell
+```console
 go test ./...
 go vet ./...
-go build -o bin/shiorin.exe ./cmd/api
+go build ./cmd/api
 ```
 
-To include real PostgreSQL integration tests:
+To include PostgreSQL integration tests:
+
+### PowerShell
 
 ```powershell
 $env:TEST_DATABASE_URL = "postgres://shiorin:shiorin_dev@127.0.0.1:54329/shiorin?sslmode=disable"
 go test -count=1 ./...
 ```
 
-The database integration test creates and drops only a randomly named test schema and requires permission
-to create schemas. It checks persistence across repository recreation, multi-instance revocation, ownership,
-pagination, expiry, cleanup, and concurrent migration execution. Without `TEST_DATABASE_URL`, that test is skipped.
-GitHub Actions provisions PostgreSQL and runs `go test -race ./...` on Linux, including integration tests.
+### macOS and Linux
+
+```bash
+TEST_DATABASE_URL="postgres://shiorin:shiorin_dev@127.0.0.1:54329/shiorin?sslmode=disable" go test -count=1 ./...
+```
+
+The integration test creates and drops only a randomly named test schema, so the database user needs permission to create schemas. It verifies persistence, multi-instance revocation, ownership, pagination, expiry, cleanup, and concurrent migrations. Without `TEST_DATABASE_URL`, it is skipped. CI runs formatting checks, vet, builds, and `go test -race ./...` with PostgreSQL on Linux.
 
 ## Database migrations
 
-`go run ./cmd/migrate` applies schema changes explicitly. The API does not migrate tables at startup.
-The runner uses a transaction, a PostgreSQL advisory lock, and a checksum recorded in `shiorin_migrations`.
-Repeated runs are safe; a changed already-applied migration is rejected. The checksum normalizes Windows line endings.
+`go run ./cmd/migrate` applies schema changes explicitly; the API never migrates tables at startup. The runner uses a transaction, a PostgreSQL advisory lock, and checksums stored in `shiorin_migrations`. Repeated runs are safe, while changes to an applied migration are rejected. Checksums normalize Windows line endings.
 
-The initial migration expects a fresh database. If an earlier draft of `db/schema.sql` was applied manually,
-do not drop existing data: prepare an explicit upgrade/import migration, including ownership for old bookmarks.
-Once migration 1 has been applied, preserve it and add future schema changes as new migration versions.
+The initial migration expects a fresh database. If an earlier draft of `db/schema.sql` was applied manually, preserve the data and prepare an explicit upgrade or import migration, including ownership for existing bookmarks. Once migration 1 is applied, do not modify it; add subsequent changes as new migration versions.
 
-## Current scope and next steps
+## Project structure
 
-Accounts, sessions, and bookmarks persist in PostgreSQL by default. The HTTP server listens on loopback by default.
-Before hosting it for other users, configure HTTPS and sustained authentication rate limiting.
-The concurrency limit bounds simultaneous password hashing; it is not a login-attempt rate limit.
-Account verification and password recovery are not implemented.
+- `cmd/api`: server startup, timeouts, and graceful shutdown
+- `cmd/migrate`: explicit schema migration command
+- `internal/httpapi`: HTTP handlers, validation, and API tests
+- `internal/auth`: registration, password hashing, sessions, and repository contract
+- `internal/bookmark`: bookmark types, repository interface, and in-memory storage
+- `internal/postgres`: persistent repositories and database integration tests
+- `db/schema.sql`: initial managed schema embedded in the migration runner
+- `compose.yaml`: local PostgreSQL instance with persistent storage
+- `.github/workflows/ci.yml`: formatting, vet, race tests, and builds
+
+## Production considerations
+
+The default configuration listens on loopback and is intended for development. Before exposing Shiorin to other users:
+
+- terminate connections with HTTPS;
+- add sustained authentication attempt rate limiting—the hash concurrency limit is not a login rate limit;
+- keep clocks synchronized across API hosts;
+- plan account verification and password recovery if required.
+
+Cookie authentication, JWTs, automatic token refresh, and device fingerprinting are not implemented.
+
+## Roadmap
 
 1. Add a browser UI for login and session management.
 2. Add bookmark updates, deletion, favorites, and saved searches.
 3. Evaluate search quality and index performance using real data.
-
-Cookie authentication, JWTs, automatic token refresh, and device fingerprinting are not implemented.
-Every repository query must continue to filter by the authenticated user before counting or paging.
-The module path in `go.mod` matches the existing Git remote.

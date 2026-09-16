@@ -223,3 +223,8 @@ Cookie authentication, JWTs, automatic token refresh, and device fingerprinting 
 1. Add a browser UI for login and session management.
 2. Add bookmark updates, deletion, favorites, and saved searches.
 3. Evaluate search quality and index performance using real data.
+
+## LICENSE
+
+This application is licensed under the Elastic License 2.0 (ELv2).
+See [LICENSE](LICENSE) for details.

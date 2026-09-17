@@ -18,6 +18,7 @@ import (
 
 func New(repo bookmark.Repository, accounts *auth.Service) http.Handler {
 	mux := http.NewServeMux()
+	addUIRoutes(mux)
 	addAuthRoutes(mux, accounts)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /bookmarks", requireUser(accounts, func(w http.ResponseWriter, r *http.Request, user auth.User) {

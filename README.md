@@ -1,9 +1,10 @@
 # Shiorin
 
-Shiorin is a self-hosted bookmark API written in Go. It stores technical articles in PostgreSQL and provides bearer-token authentication, per-user data isolation, tags, and text search.
+Shiorin is a self-hosted bookmark application written in Go, with a simple HTML interface and a JSON API. It stores technical articles in PostgreSQL and provides bearer-token authentication, per-user data isolation, tags, and text search.
 
 ## Features
 
+- Browser UI for account registration, login, bookmark creation, and search
 - Account registration with Argon2id password hashing
 - Independent, revocable login sessions
 - Private bookmarks scoped to the authenticated user
@@ -49,6 +50,36 @@ $ curl http://127.0.0.1:8080/healthz
 
 The Compose credentials are for local development only. PostgreSQL data is stored in a named volume and survives container and API restarts.
 
+## Browser interface
+
+Open <http://127.0.0.1:8080/> after starting the server. Create an account, log in,
+and save bookmarks with optional notes and comma-separated tags. Search by text
+or an exact tag, and use Previous / Next to browse results. Saving a bookmark
+clears the search filters so you can see the latest entries.
+
+The UI uses plain HTML, CSS, and JavaScript embedded in the Go binary. No frontend
+build tools or separate web server are required. Rebuild or restart `go run` after
+editing files in `internal/httpapi/web`.
+
+The bearer token is stored in browser `sessionStorage`, keeping login across
+reloads in the same tab. Browser session restoration or tab duplication may retain
+or copy that storage; use **Log out** to revoke the server session explicitly.
+If browser storage is unavailable, login lasts until the page is reloaded.
+Tokens remain accessible to same-origin JavaScript. The UI uses a restrictive
+Content Security Policy, no third-party scripts, and text-only rendering of saved
+content. Passwords are not stored in browser storage. Expired or revoked sessions
+return the UI to the login form on the next authenticated request.
+
+For a temporary demo without PostgreSQL, run:
+
+```powershell
+$env:STORAGE = "memory"
+go run ./cmd/api
+```
+
+In-memory accounts and bookmarks are lost when the server stops. Unset `STORAGE`
+or set it to `postgres` to return to persistent storage.
+
 ## Try the API
 
 This PowerShell example registers a user, logs in, creates and searches for a bookmark, and logs out. Run it in a separate terminal while the API is running.
@@ -77,7 +108,7 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/auth/logout -Headers $
 
 ## API overview
 
-All endpoints except `/healthz`, `/auth/register`, and `/auth/login` require an `Authorization: Bearer <access_token>` header.
+All API endpoints except `/healthz`, `/auth/register`, and `/auth/login` require an `Authorization: Bearer <access_token>` header. The browser page at `/` and its CSS/JavaScript assets are public; bookmark data still requires authentication.
 
 | Method | Path | Auth | Success | Description |
 |---|---|:---:|:---:|---|
@@ -220,7 +251,7 @@ Cookie authentication, JWTs, automatic token refresh, and device fingerprinting 
 
 ## Roadmap
 
-1. Add a browser UI for login and session management.
+1. Add device session management to the browser UI.
 2. Add bookmark updates, deletion, favorites, and saved searches.
 3. Evaluate search quality and index performance using real data.
 

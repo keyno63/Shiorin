@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shiorin — Your bookmarks</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div><a class="brand" href="/">Shiorin<span aria-hidden="true"> /</span></a><p>A little place for things worth keeping.</p></div>
+      <div id="account" hidden><span id="username"></span><button id="logout" class="secondary" type="button">Log out</button></div>
+    </header>
+    <main>
+      <noscript><p class="notice">Please enable JavaScript to use Shiorin.</p></noscript>
+      <p id="status" class="notice" role="status" aria-live="polite" hidden></p>
+      <section id="auth-panel" class="panel narrow" aria-labelledby="auth-heading">
+        <p class="eyebrow">YOUR PERSONAL LIBRARY</p>
+        <h1 id="auth-heading">Keep it for later.</h1>
+        <p>Save links, add a few notes, and find them when you need them. Your bookmarks are private to your account.</p>
+        <form id="auth-form">
+          <label for="login-username">Username</label>
+          <input id="login-username" name="username" autocomplete="username" required pattern="[A-Za-z0-9_-]{3,32}" minlength="3" maxlength="32" aria-describedby="username-hint">
+          <small id="username-hint">3–32 letters, numbers, underscores or hyphens.</small>
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="password-hint">
+          <small id="password-hint">New accounts need at least 15 characters (up to 1,024 bytes).</small>
+          <div class="actions"><button type="submit" name="action" value="login">Log in</button><button class="secondary" type="submit" name="action" value="register">Create account</button></div>
+        </form>
+        <small class="footnote">You stay signed in on reload in this tab. Log out when you finish on a shared device.</small>
+      </section>
+      <div id="library" hidden>
+        <div class="library-heading"><div><p class="eyebrow">YOUR PERSONAL LIBRARY</p><h1>Bookmarks</h1></div><a href="#add-heading" class="text-link">+ Add a bookmark</a></div>
+        <div class="layout">
+          <section aria-label="Search bookmarks">
+            <form id="search-form" class="panel search">
+              <div><label for="query">Search</label><input id="query" name="q" type="search" placeholder="Title, URL or note"></div>
+              <div><label for="tag">Tag</label><input id="tag" name="tag" placeholder="e.g. go"></div>
+              <button type="submit">Search</button>
+            </form>
+            <p id="result-summary" aria-live="polite"></p>
+            <ul id="results" class="results"></ul>
+            <p id="empty" class="panel empty" hidden>No bookmarks here yet. Save your first link using the form.</p>
+            <nav class="pagination" aria-label="Search result pages"><button id="previous" class="secondary" type="button" disabled>Previous</button><span id="page"></span><button id="next" class="secondary" type="button" disabled>Next</button></nav>
+          </section>
+          <section class="panel add" aria-labelledby="add-heading">
+            <h2 id="add-heading" tabindex="-1">Add a bookmark</h2>
+            <form id="bookmark-form">
+              <label for="title">Title</label><input id="title" name="title" required maxlength="500">
+              <label for="url">URL</label><input id="url" name="url" type="url" placeholder="https://example.com/article" required>
+              <label for="note">Note <span class="optional">optional</span></label><textarea id="note" name="note" rows="4" placeholder="What would you like to remember?"></textarea>
+              <label for="tags">Tags <span class="optional">optional</span></label><input id="tags" name="tags" placeholder="go, database" aria-describedby="tags-hint"><small id="tags-hint">Separate tags with commas.</small>
+              <button type="submit" class="save">Save bookmark</button>
+            </form>
+          </section>
+        </div>
+      </div>
+    </main>
+    <footer>Shiorin · A bookmark at a time.</footer>
+  </div>
+</body>
+</html>

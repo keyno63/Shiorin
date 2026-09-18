@@ -33,7 +33,7 @@ func TestUIRoutesKeepAPIAuthenticationAndNotFound(t *testing.T) {
 		{"GET", "/me", 401},
 		{"GET", "/missing", 404},
 		{"GET", "/assets/missing.js", 404},
-		{"GET", "/assets/../web/index.html", 301},
+		{"GET", "/web/index.html", 404},
 		{"POST", "/", 405},
 	} {
 		if w := request(h, tc.method, tc.path, ""); w.Code != tc.status {

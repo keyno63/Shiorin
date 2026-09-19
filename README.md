@@ -4,7 +4,7 @@ Shiorin is a self-hosted bookmark application written in Go, with a simple HTML 
 
 ## Features
 
-- Browser UI for account registration, login, bookmark creation, and search
+- Embedded browser UI for account registration, login, bookmark creation, and search
 - Account registration with Argon2id password hashing
 - Independent, revocable login sessions
 - Private bookmarks scoped to the authenticated user
@@ -48,6 +48,9 @@ $ curl http://127.0.0.1:8080/healthz
 {"status":"ok"}
 ```
 
+Then open <http://127.0.0.1:8080/> to use the browser interface. No separate
+frontend server or JavaScript build step is required.
+
 The Compose credentials are for local development only. PostgreSQL data is stored in a named volume and survives container and API restarts.
 
 ## Browser interface
@@ -80,7 +83,7 @@ go run ./cmd/api
 In-memory accounts and bookmarks are lost when the server stops. Unset `STORAGE`
 or set it to `postgres` to return to persistent storage.
 
-## Try the API
+## Use the JSON API
 
 This PowerShell example registers a user, logs in, creates and searches for a bookmark, and logs out. Run it in a separate terminal while the API is running.
 
@@ -230,7 +233,8 @@ The initial migration expects a fresh database. If an earlier draft of `db/schem
 
 - `cmd/api`: server startup, timeouts, and graceful shutdown
 - `cmd/migrate`: explicit schema migration command
-- `internal/httpapi`: HTTP handlers, validation, and API tests
+- `internal/httpapi`: HTTP handlers, embedded UI, validation, and HTTP tests
+- `internal/httpapi/web`: browser UI source files embedded in the Go binary
 - `internal/auth`: registration, password hashing, sessions, and repository contract
 - `internal/bookmark`: bookmark types, repository interface, and in-memory storage
 - `internal/postgres`: persistent repositories and database integration tests
